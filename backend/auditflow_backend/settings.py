@@ -6,6 +6,7 @@ Configured for AUDITFLOW Document Approval Engine.
 from pathlib import Path
 import os
 from dotenv import load_dotenv
+import dj_database_url
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -13,15 +14,13 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Load environment variables explicitly from backend/.env so it works regardless of working directory
 load_dotenv(BASE_DIR / ".env")
 
-# Core Django Settings
-DJANGO_SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "dev-secret-key-replace-in-production")
-SECRET_KEY = DJANGO_SECRET_KEY
+# Core Django Settings (strictly sourced from environment variables)
+SECRET_KEY = os.getenv("DJANGO_SECRET_KEY") or os.getenv("SECRET_KEY", "")
 
-DJANGO_DEBUG = os.getenv("DJANGO_DEBUG", "True").lower() in ("true", "1", "yes", "t")
-DEBUG = DJANGO_DEBUG
+DEBUG = (os.getenv("DJANGO_DEBUG") or os.getenv("DEBUG", "False")).lower() in ("true", "1", "yes", "t")
 
-DJANGO_ALLOWED_HOSTS = os.getenv("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1")
-ALLOWED_HOSTS = [host.strip() for host in DJANGO_ALLOWED_HOSTS.split(",") if host.strip()]
+ALLOWED_HOSTS_RAW = os.getenv("DJANGO_ALLOWED_HOSTS") or os.getenv("ALLOWED_HOSTS", "")
+ALLOWED_HOSTS = [host.strip() for host in ALLOWED_HOSTS_RAW.split(",") if host.strip()]
 
 # Application definition
 INSTALLED_APPS = [
@@ -42,6 +41,7 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",  # CORS headers must be processed first
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",  # WhiteNoise right after SecurityMiddleware
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -71,16 +71,26 @@ TEMPLATES = [
 WSGI_APPLICATION = "auditflow_backend.wsgi.application"
 
 # Database Configuration
-# Supports SQLite fallback by default, and PostgreSQL when DB_ENGINE=postgres
-DB_ENGINE = os.getenv("DB_ENGINE", "sqlite").lower()
+# Sourced strictly from environment variables: supports DATABASE_URL (Render),
+# DB_ENGINE=postgres with DB_* variables, or fallback to SQLite locally.
+DATABASE_URL = os.getenv("DATABASE_URL", "")
+DB_ENGINE = os.getenv("DB_ENGINE", "").lower()
 DB_NAME = os.getenv("DB_NAME", "")
 DB_USER = os.getenv("DB_USER", "")
 DB_PASSWORD = os.getenv("DB_PASSWORD", "")
 DB_HOST = os.getenv("DB_HOST", "")
-DB_PORT = os.getenv("DB_PORT", "5432") or "5432"
-DB_SSLMODE = os.getenv("DB_SSLMODE", "require")
+DB_PORT = os.getenv("DB_PORT", "")
+DB_SSLMODE = os.getenv("DB_SSLMODE", "")
 
-if DB_ENGINE == "postgres":
+if DATABASE_URL:
+    DATABASES = {
+        "default": dj_database_url.config(
+            default=DATABASE_URL,
+            conn_max_age=600,
+            ssl_require=True,
+        )
+    }
+elif DB_ENGINE == "postgres":
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.postgresql",
@@ -88,13 +98,14 @@ if DB_ENGINE == "postgres":
             "USER": DB_USER,
             "PASSWORD": DB_PASSWORD,
             "HOST": DB_HOST,
-            "PORT": DB_PORT,
+            "PORT": DB_PORT or "5432",
             "OPTIONS": {
-                "sslmode": DB_SSLMODE,
+                "sslmode": DB_SSLMODE or "require",
             },
         }
     }
 else:
+    # SQLite local fallback
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.sqlite3",
@@ -126,6 +137,18 @@ USE_TZ = True
 
 # Static files (CSS, JavaScript, Images)
 STATIC_URL = "static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
+# Ensure staticfiles directory exists so WhiteNoise initializes cleanly during tests and dev
+STATIC_ROOT.mkdir(parents=True, exist_ok=True)
+
+STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+}
 
 # Media storage (Local fallback storage for uploaded documents)
 MEDIA_URL = "/media/"
@@ -145,13 +168,16 @@ REST_FRAMEWORK = {
     "EXCEPTION_HANDLER": "workflow.exceptions.custom_exception_handler",
 }
 
-# CORS Configuration
-CORS_ALLOWED_ORIGINS_RAW = os.getenv(
-    "CORS_ALLOWED_ORIGINS",
-    "http://localhost:5173,http://127.0.0.1:5173"
-)
+# CORS Configuration (strictly sourced from environment variables)
+CORS_ALLOWED_ORIGINS_RAW = os.getenv("CORS_ALLOWED_ORIGINS", "")
 CORS_ALLOWED_ORIGINS = [
     origin.strip() for origin in CORS_ALLOWED_ORIGINS_RAW.split(",") if origin.strip()
+]
+
+# CSRF Trusted Origins (strictly sourced from environment variables; required for Render HTTPS domains)
+CSRF_TRUSTED_ORIGINS_RAW = os.getenv("CSRF_TRUSTED_ORIGINS", "")
+CSRF_TRUSTED_ORIGINS = [
+    origin.strip() for origin in CSRF_TRUSTED_ORIGINS_RAW.split(",") if origin.strip()
 ]
 
 # Supabase Storage Configuration (optional remote storage)
@@ -160,5 +186,5 @@ SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 SUPABASE_STORAGE_BUCKET = os.getenv("SUPABASE_STORAGE_BUCKET", "auditflow-documents")
 
-# Cryptographic HMAC Signing Secret
-SIGNING_SECRET = os.getenv("SIGNING_SECRET", "auditflow-dev-signing-secret-REPLACE_BEFORE_PRODUCTION")
+# Cryptographic HMAC Signing Secret (strictly sourced from environment variables)
+SIGNING_SECRET = os.getenv("SIGNING_SECRET", "")

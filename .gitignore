@@ -22,9 +22,11 @@ dist/
 frontend/dist/
 .vite/
 
-# Media uploads
+# Media & Static files
 media/
 backend/media/
+staticfiles/
+backend/staticfiles/
 
 # IDE / OS
 .DS_Store
